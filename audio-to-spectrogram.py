@@ -9,7 +9,7 @@ import librosa.display
 #to play audio
 import IPython.display as ipd
 
-audio_fpath = "../input/audio/audio/"
+audio_fpath = "Andean-Guan14.mp3"
 audio_clips = os.listdir(audio_fpath)
 print("No. of .wav files in audio folder = ",len(audio_clips))
 
