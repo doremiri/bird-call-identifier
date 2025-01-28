@@ -1,3 +1,4 @@
+
 import argparse
 from pathlib import Path
 import cv2
@@ -27,6 +28,31 @@ def list_files(source):
     return files
 
 
+def noise_reduction(y, sr):
+    """
+    Perform noise reduction on an audio signal.
+
+    Args:
+        y (numpy.ndarray): The audio time-series signal.
+        sr (int): The sampling rate of the audio signal.
+
+    Returns:
+        numpy.ndarray: The denoised audio signal.
+    """
+    print("Debug: Performing noise reduction")
+    # Estimate noise power using silent parts
+    noise_power = librosa.feature.rms(y=y).mean()
+    print(f"Debug: Estimated noise power: {noise_power}")
+
+    # Create a threshold for noise reduction
+    threshold = noise_power * 1.5
+    print(f"Debug: Noise reduction threshold: {threshold}")
+
+    # Apply a simple filter to suppress noise below the threshold
+    denoised_signal = np.where(np.abs(y) > threshold, y, 0)
+    return denoised_signal
+
+
 def audio_to_spectrogram(audio_path, save_path, duration):
     """
     Convert an audio file to a colored spectrogram and save it as an image.
@@ -44,6 +70,9 @@ def audio_to_spectrogram(audio_path, save_path, duration):
     # Load audio file
     y, sr = librosa.load(audio_path, sr=22050, duration=duration)
     print(f"Debug: Audio loaded with sample rate {sr} and {len(y)} samples")
+
+    # Perform noise reduction
+    y = noise_reduction(y, sr)
 
     # Compute Mel Spectrogram
     print("Debug: Computing Mel Spectrogram")
