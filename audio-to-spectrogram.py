@@ -1,6 +1,5 @@
 import argparse
 from pathlib import Path
-
 import cv2
 import librosa
 import numpy as np
@@ -9,22 +8,28 @@ from tqdm import tqdm
 
 def list_files(source):
     """
-    List all files in the given source directory and its subdirectories.
+    List all audio files in the given source directory and its subdirectories.
 
     Args:
         source (str): The source directory path.
 
     Returns:
-        list: A list of `Path` objects representing the files.
+        list: A list of `Path` objects representing the audio files.
     """
+    print(f"Debug: Listing all audio files in source directory: {source}")
     path = Path(source)
-    files = [file for file in path.rglob('*') if file.is_file()]
+    files = []
+    for species_folder in path.iterdir():
+        if species_folder.is_dir():  # Check if it's a species folder
+            species_files = [file for file in species_folder.glob('*.mp3')]
+            files.extend(species_files)  # Add mp3 files from this species folder
+    print(f"Debug: Found {len(files)} audio files in species subfolders")
     return files
 
 
 def audio_to_spectrogram(audio_path, save_path, duration):
     """
-    Convert an audio file to a spectrogram and save it as an image.
+    Convert an audio file to a colored spectrogram and save it as an image.
 
     Args:
         audio_path (str): The path to the audio file.
@@ -34,40 +39,66 @@ def audio_to_spectrogram(audio_path, save_path, duration):
     Returns:
         None
     """
+    print(f"Debug: Loading audio file from: {audio_path} with duration {duration} seconds")
+    
     # Load audio file
-    y, sr = librosa.load(audio_path, duration=duration)
+    y, sr = librosa.load(audio_path, sr=22050, duration=duration)
+    print(f"Debug: Audio loaded with sample rate {sr} and {len(y)} samples")
 
-    # Compute spectrogram
-    D = librosa.stft(y)
-    S = librosa.amplitude_to_db(abs(D), ref=np.max)
+    # Compute Mel Spectrogram
+    print("Debug: Computing Mel Spectrogram")
+    S = librosa.feature.melspectrogram(y=y, sr=sr, n_mels=128, fmax=8000)
+    print("Debug: Mel Spectrogram computed, converting to dB scale")
+    S = librosa.power_to_db(S, ref=np.max)
 
     # Normalize values to 0-255 range and convert to uint8
+    print("Debug: Normalizing spectrogram values to range 0-255")
     S = cv2.normalize(S, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
 
-    # Convert to RGB and save as PNG
-    S = cv2.cvtColor(S, cv2.COLOR_GRAY2RGB)
-    cv2.imwrite(save_path, S)
+    # Apply a colormap
+    print("Debug: Applying colormap")
+    S_colored = cv2.applyColorMap(S, cv2.COLORMAP_JET)
+
+    # Resize image to a fixed size (128x128)
+    print("Debug: Resizing spectrogram to 128x128")
+    S_resized = cv2.resize(S_colored, (128, 128))
+
+    # Save as PNG
+    print(f"Debug: Saving spectrogram image to: {save_path}")
+    cv2.imwrite(save_path, S_resized)
+    print("Debug: Spectrogram saved successfully")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--source', type=str, default='birds', help='source folder')
-    parser.add_argument('--duration', type=int, default=60, help='duration of audios in case they are too big')
-    parser.add_argument('--output', type=str, default='output', help='folder output')
+    parser.add_argument('--source', type=str, default='audio-dataset', help='source folder containing species subfolders')
+    parser.add_argument('--duration', type=int, default=30, help='duration of audio in seconds to process')
+    parser.add_argument('--output', type=str, default='output-dataset', help='output folder for spectrograms')
     opt = parser.parse_args()
+
     source, duration, output = opt.source, opt.duration, opt.output
 
+    print(f"Debug: Starting process with source={source}, duration={duration}s, output={output}")
+
+    # List all audio files
     file_list = list_files(source)
 
     for file in tqdm(file_list):
-        # Output path
-        new_path = Path(str(file).replace(str(source), output))
+        # Extract the species (subfolder) name
+        species_folder = file.parent.name
+        print(f"Debug: Processing file {file} from species folder {species_folder}")
 
-        # Create output directory
+        # Create corresponding output path
+        new_path = Path(output) / species_folder / file.stem
+
+        # Ensure output directory exists
+        print(f"Debug: Ensuring output directory exists: {new_path.parent}")
         new_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Replace suffix
+        # Replace suffix with .png
         new_path = new_path.with_suffix('.png')
 
-        # Convert
+        # Convert audio to spectrogram
+        print(f"Debug: Converting audio to spectrogram and saving to {new_path}")
         audio_to_spectrogram(str(file), str(new_path), duration)
+    print("Debug: Processing completed")
