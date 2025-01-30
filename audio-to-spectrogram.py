@@ -2,16 +2,19 @@ import os
 import librosa
 import numpy as np
 from pydub import AudioSegment
+from scipy.io.wavfile import write
 
-def concatenate_audio_in_memory(file_paths):
-    """Concatenate all audio files in memory."""
-    print(f"Concatenating {len(file_paths)} audio files in memory...")
+def concatenate_audio_files(file_paths, output_file):
+    """Concatenate all audio files into a single audio file."""
+    print(f"Concatenating {len(file_paths)} audio files into {output_file}...")
     combined = AudioSegment.empty()
     for file_path in file_paths:
         print(f"Loading {file_path}...")
         audio = AudioSegment.from_file(file_path)
         combined += audio
-    return combined
+    combined.export(output_file, format="wav")
+    print(f"Saved concatenated audio to {output_file}.")
+    return output_file
 
 def remove_noise_and_silence(audio, sr, noise_reduction_threshold=0.02, silence_threshold=0.01):
     """Apply basic noise reduction and silence removal."""
@@ -49,13 +52,13 @@ def process_species_audio(species_folder, output_folder, chunk_length=10):
     file_paths = [os.path.join(species_folder, f) for f in os.listdir(species_folder) if f.endswith('.mp3')]
     print(f"Found {len(file_paths)} audio files.")
 
-    # Concatenate all audio files in memory
-    combined_audio = concatenate_audio_in_memory(file_paths)
+    # Concatenate all audio files
+    concatenated_file = os.path.join(output_folder, "concatenated.wav")
+    concatenated_file = concatenate_audio_files(file_paths, concatenated_file)
 
-    # Convert to numpy array and sample rate
-    print("Converting concatenated audio to numpy array...")
-    audio = np.array(combined_audio.get_array_of_samples())
-    sr = combined_audio.frame_rate
+    # Load concatenated audio
+    print(f"Loading concatenated audio from {concatenated_file}...")
+    audio, sr = librosa.load(concatenated_file, sr=None)
 
     # Apply noise reduction and silence removal
     audio_clean = remove_noise_and_silence(audio, sr)
