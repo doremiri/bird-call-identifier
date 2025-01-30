@@ -1,94 +1,103 @@
-import argparse
-from pathlib import Path
-import cv2
+import os
 import librosa
 import numpy as np
-from tqdm import tqdm
+from pydub import AudioSegment
+from scipy.io.wavfile import write
 
-def list_files(source):
-    """List audio files with supported extensions"""
-    valid_extensions = ['.mp3', '.wav', '.ogg', '.flac']
-    path = Path(source)
-    return [f for f in path.rglob('*') if f.suffix.lower() in valid_extensions]
+def concatenate_audio_files(file_paths, output_file):
+    """Concatenate all audio files into a single audio file."""
+    print(f"Concatenating {len(file_paths)} audio files into {output_file}...")
+    combined = AudioSegment.empty()
+    for file_path in file_paths:
+        print(f"Loading {file_path}...")
+        audio = AudioSegment.from_file(file_path)
+        combined += audio
+    combined.export(output_file, format="wav")
+    print(f"Saved concatenated audio to {output_file}.")
+    return output_file
 
-def improved_noise_reduction(y, sr, noise_duration=0.5):
-    """Improved noise reduction using spectral gating"""
-    # Get noise profile from first 500ms
-    noise_sample = y[:int(sr * noise_duration)]
-    noise_stft = librosa.stft(noise_sample)
-    noise_profile = np.mean(np.abs(noise_stft), axis=1)
-    
-    # Apply spectral gating
-    D = librosa.stft(y)
-    S_db = librosa.amplitude_to_db(np.abs(D), ref=np.max)
-    mask = np.abs(D) > noise_profile[:, np.newaxis]
-    y_clean = librosa.istft(D * mask)
-    return y_clean
+def remove_noise_and_silence(audio, sr, noise_reduction_threshold=0.02, silence_threshold=0.01):
+    """Apply basic noise reduction and silence removal."""
+    print("Applying noise reduction and silence removal...")
+    # Noise reduction: Remove low-amplitude noise
+    audio_clean = librosa.effects.preemphasis(audio)
+    audio_clean = np.where(np.abs(audio_clean) < noise_reduction_threshold, 0, audio_clean)
 
-def audio_to_spectrogram(audio_path, save_path, duration=30):
-    # Load audio with resampling
-    y, sr = librosa.load(audio_path, sr=22050, duration=duration)
-    
-    # Noise reduction
-    y = improved_noise_reduction(y, sr)
+    # Silence removal: Trim leading and trailing silence
+    audio_trimmed, _ = librosa.effects.trim(audio_clean, top_db=20)
+    print(f"Audio length before trimming: {len(audio)}, after trimming: {len(audio_trimmed)}.")
+    return audio_trimmed
 
-    # Mel spectrogram parameters
-    n_fft = 2048
-    hop_length = 512
-    n_mels = 256
-    fmax = 11025  # Half of sample rate
+def split_into_chunks(audio, sr, chunk_length=10):
+    """Split audio into fixed-length chunks (in seconds)."""
+    print(f"Splitting audio into {chunk_length}-second chunks...")
+    chunk_size = sr * chunk_length
+    chunks = [audio[i:i + chunk_size] for i in range(0, len(audio), chunk_size)]
+    # Discard the last chunk if it's smaller than chunk_size
+    chunks = [chunk for chunk in chunks if len(chunk) == chunk_size]
+    print(f"Created {len(chunks)} chunks of {chunk_length} seconds each.")
+    return chunks
 
-    # Create mel spectrogram
-    S = librosa.feature.melspectrogram(y=y, sr=sr, n_fft=n_fft,
-                                      hop_length=hop_length,
-                                      n_mels=n_mels, fmax=fmax)
-    
-    # Convert to dB scale with better normalization
-    S_db = librosa.power_to_db(S, ref=np.median if S.max() == 0 else np.max)
+def audio_to_mel_spectrogram(audio, sr, n_mels=128):
+    """Convert audio to mel spectrogram."""
+    print("Converting audio to mel spectrogram...")
+    mel_spec = librosa.feature.melspectrogram(y=audio, sr=sr, n_mels=n_mels)
+    mel_spec_db = librosa.power_to_db(mel_spec, ref=np.max)
+    return mel_spec_db
 
-    # Percentile-based normalization
-    vmin = np.percentile(S_db, 5)
-    vmax = np.percentile(S_db, 95)
-    S_norm = np.clip((S_db - vmin) / (vmax - vmin), 0, 1)
-    
-    # Convert to color image
-    S_uint8 = (255 * S_norm).astype(np.uint8)
-    colored = cv2.applyColorMap(S_uint8, cv2.COLORMAP_MAGMA)
+def process_species_audio(species_folder, output_folder, chunk_length=10):
+    """Process all audio files for a specific species."""
+    print(f"Processing species folder: {species_folder}...")
+    # Get all audio files in the folder
+    file_paths = [os.path.join(species_folder, f) for f in os.listdir(species_folder) if f.endswith('.mp3')]
+    print(f"Found {len(file_paths)} audio files.")
 
-    # Smart resizing while preserving aspect ratio
-    target_size = (224, 224)
-    height, width = colored.shape[:2]
-    
-    # Calculate scaling factor
-    scale = min(target_size[0]/height, target_size[1]/width)
-    new_size = (int(width * scale), int(height * scale))
-    
-    resized = cv2.resize(colored, new_size, interpolation=cv2.INTER_AREA)
-    
-    # Pad to target size
-    delta_w = target_size[1] - new_size[0]
-    delta_h = target_size[0] - new_size[1]
-    top, bottom = delta_h//2, delta_h - (delta_h//2)
-    left, right = delta_w//2, delta_w - (delta_w//2)
-    
-    padded = cv2.copyMakeBorder(resized, top, bottom, left, right, 
-                               cv2.BORDER_CONSTANT, value=0)
+    # Concatenate all audio files
+    concatenated_file = os.path.join(output_folder, "concatenated.wav")
+    concatenated_file = concatenate_audio_files(file_paths, concatenated_file)
 
-    # Save as PNG
-    cv2.imwrite(save_path, padded)
+    # Load concatenated audio
+    print(f"Loading concatenated audio from {concatenated_file}...")
+    audio, sr = librosa.load(concatenated_file, sr=None)
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--source', type=str, default='audio-dataset')
-    parser.add_argument('--duration', type=int, default=30)
-    parser.add_argument('--output', type=str, default='spectrogram-dataset')
-    args = parser.parse_args()
+    # Apply noise reduction and silence removal
+    audio_clean = remove_noise_and_silence(audio, sr)
 
-    Path(args.output).mkdir(exist_ok=True, parents=True)
-    
-    for audio_file in tqdm(list_files(args.source)):
-        species = audio_file.parent.name
-        output_path = Path(args.output) / species / f"{audio_file.stem}.png"
-        output_path.parent.mkdir(exist_ok=True)
-        
-        audio_to_spectrogram(str(audio_file), str(output_path), args.duration)
+    # Split into fixed-length chunks
+    chunks = split_into_chunks(audio_clean, sr, chunk_length=chunk_length)
+
+    # Convert each chunk to mel spectrogram and save
+    print("Converting chunks to mel spectrograms...")
+    spectrograms = []
+    for i, chunk in enumerate(chunks):
+        print(f"Processing chunk {i + 1}/{len(chunks)}...")
+        mel_spec = audio_to_mel_spectrogram(chunk, sr)
+        spectrograms.append(mel_spec)
+        # Save spectrogram as numpy array
+        output_file = os.path.join(output_folder, f"spectrogram_{i}.npy")
+        np.save(output_file, mel_spec)
+        print(f"Saved spectrogram to {output_file}.")
+
+    print(f"Finished processing {species_folder}.\n")
+    return spectrograms
+
+def process_all_species(input_base_folder, output_base_folder, chunk_length=10):
+    """Process all species folders in the input base folder."""
+    # Create output base folder if it doesn't exist
+    os.makedirs(output_base_folder, exist_ok=True)
+
+    # Iterate over each species folder
+    for species_name in os.listdir(input_base_folder):
+        species_folder = os.path.join(input_base_folder, species_name)
+        if os.path.isdir(species_folder):
+            print(f"\nProcessing species: {species_name}...")
+            # Create output folder for this species
+            species_output_folder = os.path.join(output_base_folder, species_name)
+            os.makedirs(species_output_folder, exist_ok=True)
+            # Process the species audio
+            process_species_audio(species_folder, species_output_folder, chunk_length=chunk_length)
+
+# Example usage
+input_base_folder = "audio-dataset"
+output_base_folder = "output-dataset"
+process_all_species(input_base_folder, output_base_folder, chunk_length=10)
