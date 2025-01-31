@@ -2,23 +2,24 @@ import os
 import librosa
 import numpy as np
 from pydub import AudioSegment
-from scipy.io.wavfile import write
+import gc  # For garbage collection
 
-def concatenate_audio_files(file_paths, output_file):
-    """Concatenate all audio files into a single audio file."""
-    print(f"Concatenating {len(file_paths)} audio files into {output_file}...")
+def concatenate_audio_files_in_memory(file_paths):
+    """Concatenate all audio files into a single audio file in memory."""
+    print(f"Concatenating {len(file_paths)} audio files in memory...")
     combined = AudioSegment.empty()
     for file_path in file_paths:
         print(f"Loading {file_path}...")
         audio = AudioSegment.from_file(file_path)
         combined += audio
-    combined.export(output_file, format="wav")
-    print(f"Saved concatenated audio to {output_file}.")
-    return output_file
+    return combined
 
 def remove_noise_and_silence(audio, sr, noise_reduction_threshold=0.02, silence_threshold=0.01):
     """Apply basic noise reduction and silence removal."""
     print("Applying noise reduction and silence removal...")
+    # Convert audio to floating-point format
+    audio = audio.astype(np.float32) / np.iinfo(audio.dtype).max  # Normalize to [-1, 1]
+
     # Noise reduction: Remove low-amplitude noise
     audio_clean = librosa.effects.preemphasis(audio)
     audio_clean = np.where(np.abs(audio_clean) < noise_reduction_threshold, 0, audio_clean)
@@ -52,16 +53,20 @@ def process_species_audio(species_folder, output_folder, chunk_length=10):
     file_paths = [os.path.join(species_folder, f) for f in os.listdir(species_folder) if f.endswith('.mp3')]
     print(f"Found {len(file_paths)} audio files.")
 
-    # Concatenate all audio files
-    concatenated_file = os.path.join(output_folder, "concatenated.wav")
-    concatenated_file = concatenate_audio_files(file_paths, concatenated_file)
+    # Concatenate all audio files in memory
+    concatenated_audio = concatenate_audio_files_in_memory(file_paths)
 
-    # Load concatenated audio
-    print(f"Loading concatenated audio from {concatenated_file}...")
-    audio, sr = librosa.load(concatenated_file, sr=None)
+    # Convert concatenated audio to numpy array
+    print("Converting concatenated audio to numpy array...")
+    audio_samples = np.array(concatenated_audio.get_array_of_samples())
+    sr = concatenated_audio.frame_rate
+
+    # Free memory used by concatenated_audio
+    del concatenated_audio
+    gc.collect()
 
     # Apply noise reduction and silence removal
-    audio_clean = remove_noise_and_silence(audio, sr)
+    audio_clean = remove_noise_and_silence(audio_samples, sr)
 
     # Split into fixed-length chunks
     chunks = split_into_chunks(audio_clean, sr, chunk_length=chunk_length)
@@ -78,8 +83,12 @@ def process_species_audio(species_folder, output_folder, chunk_length=10):
         np.save(output_file, mel_spec)
         print(f"Saved spectrogram to {output_file}.")
 
+    # Free memory used by chunks and spectrograms
+    del chunks, spectrograms
+    gc.collect()
+
     print(f"Finished processing {species_folder}.\n")
-    return spectrograms
+    return
 
 def process_all_species(input_base_folder, output_base_folder, chunk_length=10):
     """Process all species folders in the input base folder."""
