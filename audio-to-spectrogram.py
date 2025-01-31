@@ -14,19 +14,48 @@ def concatenate_audio_files_in_memory(file_paths):
         combined += audio
     return combined
 
-def remove_noise_and_silence(audio, sr, noise_reduction_threshold=0.02, silence_threshold=0.01):
-    """Apply basic noise reduction and silence removal."""
-    print("Applying noise reduction and silence removal...")
-    # Convert audio to floating-point format
-    audio = audio.astype(np.float32) / np.iinfo(audio.dtype).max  # Normalize to [-1, 1]
+import numpy as np
+import librosa
 
-    # Noise reduction: Remove low-amplitude noise
-    audio_clean = librosa.effects.preemphasis(audio)
-    audio_clean = np.where(np.abs(audio_clean) < noise_reduction_threshold, 0, audio_clean)
+def remove_noise_and_silence(audio, sr, noise_reduction_threshold=0.1, n_fft=2048, hop_length=512):
+    """
+    Apply spectral gating to reduce noise and remove silence.
+    
+    Parameters:
+        audio (np.ndarray): Input audio signal.
+        sr (int): Sample rate of the audio.
+        noise_reduction_threshold (float): Threshold for noise reduction (0 to 1).
+        n_fft (int): FFT window size.
+        hop_length (int): Hop length for STFT.
+    
+    Returns:
+        np.ndarray: Noise-reduced audio signal.
+    """
+    print("Applying spectral gating for noise reduction...")
+    
+    # Convert audio to floating-point format and normalize to [-1, 1]
+    audio = audio.astype(np.float32) / np.iinfo(audio.dtype).max
 
-    # Silence removal: Trim leading and trailing silence
+    # Compute the Short-Time Fourier Transform (STFT)
+    stft = librosa.stft(audio, n_fft=n_fft, hop_length=hop_length)
+    magnitude, phase = librosa.magphase(stft)  # Magnitude and phase components
+
+    # Estimate the noise profile (using the first few frames as noise)
+    noise_frames = 5  # Number of frames to use for noise estimation
+    noise_profile = np.mean(magnitude[:, :noise_frames], axis=1, keepdims=True)
+
+    # Apply spectral gating
+    threshold = noise_profile * noise_reduction_threshold
+    magnitude_clean = np.where(magnitude < threshold, 0, magnitude)
+
+    # Reconstruct the STFT and convert back to time-domain audio
+    stft_clean = magnitude_clean * phase
+    audio_clean = librosa.istft(stft_clean, hop_length=hop_length)
+
+    # Trim leading and trailing silence
     audio_trimmed, _ = librosa.effects.trim(audio_clean, top_db=20)
     print(f"Audio length before trimming: {len(audio)}, after trimming: {len(audio_trimmed)}.")
+
     return audio_trimmed
 
 def split_into_chunks(audio, sr, chunk_length=10):
