@@ -6,7 +6,7 @@ import librosa.display
 
 # Load a spectrogram file
 
-spectrogram = np.load("output-dataset/Bartletts Tinamou_sound/spectrogram_60.npy")
+spectrogram = np.load("output-dataset/Cinereous Tinamou_sound/spectrogram_90.npy")
 
 # Plot the spectrogram
 plt.figure(figsize=(10, 4))

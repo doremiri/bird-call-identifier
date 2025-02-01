@@ -1,4 +1,3 @@
-
 import os
 import numpy as np
 import tensorflow as tf
@@ -9,9 +8,17 @@ from tensorflow.keras.utils import to_categorical
 # Configuration
 input_base_folder = "output-dataset"  # Folder containing species folders with .npy files
 num_classes = len(os.listdir(input_base_folder))  # Number of species (classes)
-img_height, img_width = 128, 128  # Spectrogram dimensions (adjust based on your data)
+img_height, img_width = 128, 938  # Ensure consistent spectrogram width
 batch_size = 32
 epochs = 20
+
+# Function to pad spectrograms to a fixed width
+def pad_spectrogram(spectrogram, target_width=938):
+    current_width = spectrogram.shape[1]
+    if current_width < target_width:
+        padding = np.zeros((spectrogram.shape[0], target_width - current_width))
+        spectrogram = np.hstack((spectrogram, padding))  # Pad with zeros
+    return spectrogram
 
 # Step 1: Load .npy files and prepare dataset
 def load_dataset(base_folder):
@@ -25,6 +32,11 @@ def load_dataset(base_folder):
             if file_name.endswith(".npy"):
                 file_path = os.path.join(class_folder, file_name)
                 spectrogram = np.load(file_path)
+
+                # Pad if too short
+                spectrogram = pad_spectrogram(spectrogram, img_width)
+
+                print(f"{file_name} shape after padding: {spectrogram.shape}")
                 X.append(spectrogram)
                 y.append(class_idx)  # Assign class index as label
     X = np.array(X)
@@ -93,5 +105,5 @@ print(f"Validation Loss: {val_loss}")
 print(f"Validation Accuracy: {val_accuracy}")
 
 # Save the model
-model.save("bird_species_cnn_model.h5")
-print("Model saved to bird_species_cnn_model.h5")
+model.save("bird_species_cnn_model-2.h5")
+print("Model saved to bird_species_cnn_model-2.h5")
