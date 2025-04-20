@@ -2,12 +2,13 @@ import os
 import librosa
 import numpy as np
 from pydub import AudioSegment
+import noisereduce as nr
 import gc  # For garbage collection
 
 def concatenate_audio_files_in_memory(file_paths, output_file):
     """Concatenate all audio files into a single audio file in memory."""
     print(f"Concatenating {len(file_paths)} audio files in memory...")
-    combined = AudioSegment.empty()
+    combined = AudioSegment.empty() # Initialize an empty audio segment
     for file_path in file_paths:
         print(f"Loading {file_path}...")
         audio = AudioSegment.from_file(file_path)
@@ -15,46 +16,21 @@ def concatenate_audio_files_in_memory(file_paths, output_file):
     combined.export(output_file, format="wav")
     return combined
 
-def remove_noise_and_silence(audio, sr, noise_reduction_threshold=0.1, n_fft=2048, hop_length=512):
-    """
-    Apply spectral gating to reduce noise and remove silence.
+def remove_noise_and_silence(audio, sr, n_fft=2048, hop_length=512):
+    print("Applying noise reduction and trimming...")
     
-    Parameters:
-        audio (np.ndarray): Input audio signal.
-        sr (int): Sample rate of the audio.
-        noise_reduction_threshold (float): Threshold for noise reduction (0 to 1).
-        n_fft (int): FFT window size.
-        hop_length (int): Hop length for STFT.
-    
-    Returns:
-        np.ndarray: Noise-reduced audio signal.
-    """
-    print("Applying spectral gating for noise reduction...")
-    
-    # Convert audio to floating-point format and normalize to [-1, 1]
-    audio = audio.astype(np.float32) / np.iinfo(audio.dtype).max
+    # Short-time Fourier Transformation (STFT)
+    #audio_stft = librosa.core.stft(audio, hop_length=hop_length, n_fft=n_fft)
 
-    # Compute the Short-Time Fourier Transform (STFT)
-    stft = librosa.stft(audio, n_fft=n_fft, hop_length=hop_length)
-    magnitude, phase = librosa.magphase(stft)  # Magnitude and phase components
-
-    # Estimate the noise profile (using the first few frames as noise)
-    noise_frames = 5  # Number of frames to use for noise estimation
-    noise_profile = np.mean(magnitude[:, :noise_frames], axis=1, keepdims=True)
-
-    # Apply spectral gating
-    threshold = noise_profile * noise_reduction_threshold
-    magnitude_clean = np.where(magnitude < threshold, 0, magnitude)
-
-    # Reconstruct the STFT and convert back to time-domain audio
-    stft_clean = magnitude_clean * phase
-    audio_clean = librosa.istft(stft_clean, hop_length=hop_length)
+    # Convert to absolute values (magnitude)
+    #spectrogram = np.abs(audio_stft)
+    reduced_signal = nr.reduce_noise(y=audio, sr=sr)
 
     # Trim leading and trailing silence
-    audio_trimmed, _ = librosa.effects.trim(audio_clean, top_db=20)
-    print(f"Audio length before trimming: {len(audio)}, after trimming: {len(audio_trimmed)}.")
+    audio_cleaned, _ = librosa.effects.trim(reduced_signal, top_db=20)
 
-    return audio_trimmed
+    # Return the cleaned audio
+    return audio_cleaned
 
 def split_into_chunks(audio, sr, chunk_length=10):
     """Split audio into fixed-length chunks (in seconds)."""
@@ -69,6 +45,11 @@ def split_into_chunks(audio, sr, chunk_length=10):
 def audio_to_mel_spectrogram(audio, sr, n_mels=128):
     """Convert audio to mel spectrogram."""
     print("Converting audio to mel spectrogram...")
+    if not np.issubdtype(audio.dtype, np.floating):
+        audio = audio.astype(np.float32)
+
+    # Normalize audio
+    audio = audio / np.max(np.abs(audio))  
     mel_spec = librosa.feature.melspectrogram(y=audio, sr=sr, n_mels=n_mels)
     mel_spec_db = librosa.power_to_db(mel_spec, ref=np.max)
     return mel_spec_db
