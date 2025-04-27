@@ -1,7 +1,11 @@
-import os
+import matplotlib.pyplot as plt
 import numpy as np
 import tensorflow as tf
 from tensorflow.keras import layers, models
+from tensorflow.keras.applications import MobileNet
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Flatten, Dense
+from tensorflow.keras.optimizers import Adam    
 from sklearn.model_selection import train_test_split
 from tensorflow.keras.utils import to_categorical
 from sklearn.metrics import (
@@ -13,9 +17,10 @@ from sklearn.metrics import (
     roc_curve,
     auc,
 )
-import matplotlib.pyplot as plt
+import pathlib
+import os
 import seaborn as sns
-from itertools import cycle
+from itertools import cycle 
 
 # Configuration
 input_base_folder = "output-dataset"  # Folder containing species folders with .npy files
@@ -60,7 +65,7 @@ X, y, class_names = load_dataset(input_base_folder)
 
 # Add a channel dimension to X (required for CNN input)
 X = np.expand_dims(X, axis=-1)  # Shape: (num_samples, height, width, 1)
-
+X = np.repeat(X, 3, axis=-1)  # Convert to 3 channels (RGB)
 # Convert labels to one-hot encoding
 y = to_categorical(y, num_classes=num_classes)
 
@@ -68,57 +73,28 @@ y = to_categorical(y, num_classes=num_classes)
 X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, random_state=42)
 
 print(f"Training data shape: {X_train.shape}")
-print(f"Validation data shape: {X_val.shape}")
+print(f"Validation data shape: {X_val.shape}") 
 
-# Step 2: Build the CNN model
-def build_cnn_model(input_shape, num_classes):
-    model = models.Sequential([
-        # Convolutional layers
-        layers.Conv2D(32, (3, 3), activation='relu', input_shape=input_shape),
-        layers.MaxPooling2D((2, 2)),
-        layers.Conv2D(64, (3, 3), activation='relu'),
-        layers.MaxPooling2D((2, 2)),
-        layers.Conv2D(128, (3, 3), activation='relu'),
-        layers.MaxPooling2D((2, 2)),
-
-        # Fully connected layers
-        layers.Flatten(),
-        layers.Dense(256, activation='relu'),
-        layers.Dropout(0.5),  # Dropout for regularization
-        layers.Dense(num_classes, activation='softmax')  # Output layer
-    ])
-    return model
-
-# Build the model
-input_shape = (img_height, img_width, 1)  # Input shape for the CNN
-model = build_cnn_model(input_shape, num_classes)
-
-# Compile the model
-model.compile(optimizer='adam',
-              loss='categorical_crossentropy',
-              metrics=['accuracy'])
-
-# Print model summary
+base_model = MobileNet(include_top=False, weights='imagenet', input_shape=(img_height, img_width, 3))
+base_model.trainable = False  # Freeze the base model
+model = Sequential([
+    base_model,
+    layers.GlobalAveragePooling2D(),
+    layers.Dense(512, activation='relu'),
+    layers.Dense(num_classes, activation='softmax')
+])
+model.compile(optimizer=Adam(), loss='categorical_crossentropy', metrics=['accuracy'])
 model.summary()
+history = model.fit(X_train, y_train, validation_data=(X_val, y_val), epochs=epochs, batch_size=batch_size)
 
-# Step 3: Train the model
-print("Training the model...")
-history = model.fit(
-    X_train, y_train,
-    batch_size=batch_size,
-    epochs=epochs,
-    validation_data=(X_val, y_val)
-)
-
-# Step 4: Evaluate the model
 print("Evaluating the model...")
 val_loss, val_accuracy = model.evaluate(X_val, y_val)
 print(f"Validation Loss: {val_loss}")
 print(f"Validation Accuracy: {val_accuracy}")
 
 # Save the model
-model.save("bird_species_cnn_model-3.h5")
-print("Model saved to bird_species_cnn_model-3.h5")
+model.save("bird_species_mobilenet_model-3.h5")
+print("Model saved to bird_species_mobilenet_model-3.h5")
 
 # Step 5: Generate evaluation metrics and plots
 def evaluate_model(model, X_val, y_val, class_names):
@@ -189,3 +165,4 @@ def evaluate_model(model, X_val, y_val, class_names):
 
 # Evaluate the model
 evaluate_model(model, X_val, y_val, class_names)
+
