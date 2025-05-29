@@ -28,9 +28,14 @@ epochs = 20
 def pad_spectrogram(spectrogram, target_width=938):
     current_width = spectrogram.shape[1]
     if current_width < target_width:
+        # Pad with zeros on the right
         padding = np.zeros((spectrogram.shape[0], target_width - current_width))
-        spectrogram = np.hstack((spectrogram, padding))  # Pad with zeros
+        spectrogram = np.hstack((spectrogram, padding))
+    elif current_width > target_width:
+        # Truncate the spectrogram to the target width
+        spectrogram = spectrogram[:, :target_width]
     return spectrogram
+
 
 # Step 1: Load .npy files and prepare dataset
 def load_dataset(base_folder):
@@ -51,7 +56,7 @@ def load_dataset(base_folder):
                 print(f"{file_name} shape after padding: {spectrogram.shape}")
                 X.append(spectrogram)
                 y.append(class_idx)  # Assign class index as label
-    X = np.array(X)
+    X = np.array(X, dtype=np.float32)
     y = np.array(y)
     return X, y, class_names
 
