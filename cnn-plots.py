@@ -16,6 +16,7 @@ from sklearn.metrics import (
 import matplotlib.pyplot as plt
 import seaborn as sns
 from itertools import cycle
+from imblearn.over_sampling import SMOTE
 
 # Configuration
 input_base_folder = "output-dataset"  # Folder containing species folders with .npy files
@@ -63,17 +64,33 @@ def load_dataset(base_folder):
 # Load dataset
 X, y, class_names = load_dataset(input_base_folder)
 
-# Add a channel dimension to X (required for CNN input)
-X = np.expand_dims(X, axis=-1)  # Shape: (num_samples, height, width, 1)
+# First: Flatten X for SMOTE (it only works on 2D data)
+X_flat = X.reshape((X.shape[0], -1))  # Shape: (samples, features)
 
-# Convert labels to one-hot encoding
-y = to_categorical(y, num_classes=num_classes)
+# Split first (before one-hot encoding)
+X_train_flat, X_val_flat, y_train_raw, y_val_raw = train_test_split(X_flat, y, test_size=0.2, random_state=42)
 
-# Split dataset into training and validation sets
-X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, random_state=42)
+# Print class balance before SMOTE
+print(f"\n\tPre-SMOTE, label counts: {np.bincount(y_train_raw)}")
 
-print(f"Training data shape: {X_train.shape}")
+# Apply SMOTE
+sm = SMOTE(random_state=42)
+X_train_resampled_flat, y_train_resampled = sm.fit_resample(X_train_flat, y_train_raw)
+
+# Print class balance after SMOTE
+print(f"\n\tPost-SMOTE, label counts: {np.bincount(y_train_resampled)}")
+
+# Reshape back to original spectrogram shape and add channel dimension
+X_train_resampled = X_train_resampled_flat.reshape((-1, img_height, img_width, 1))
+X_val = X_val_flat.reshape((-1, img_height, img_width, 1))
+
+# One-hot encode labels
+y_train = to_categorical(y_train_resampled, num_classes=num_classes)
+y_val = to_categorical(y_val_raw, num_classes=num_classes)
+
+print(f"Training data shape after SMOTE: {X_train_resampled.shape}")
 print(f"Validation data shape: {X_val.shape}")
+
 
 # Step 2: Build the CNN model
 def build_cnn_model(input_shape, num_classes):
@@ -109,7 +126,7 @@ model.summary()
 # Step 3: Train the model
 print("Training the model...")
 history = model.fit(
-    X_train, y_train,
+    X_train_resampled, y_train,
     batch_size=batch_size,
     epochs=epochs,
     validation_data=(X_val, y_val)
