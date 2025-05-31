@@ -33,13 +33,19 @@ def remove_noise_and_silence(audio, sr, n_fft=2048, hop_length=512):
     return audio_cleaned
 
 def split_into_chunks(audio, sr, chunk_length=10):
-    """Split audio into fixed-length chunks (in seconds)."""
+    """Split audio into fixed-length chunks, padding the last if needed."""
     print(f"Splitting audio into {chunk_length}-second chunks...")
     chunk_size = sr * chunk_length
-    chunks = [audio[i:i + chunk_size] for i in range(0, len(audio), chunk_size)]
-    # Discard the last chunk if it's smaller than chunk_size
-    chunks = [chunk for chunk in chunks if len(chunk) == chunk_size]
-    print(f"Created {len(chunks)} chunks of {chunk_length} seconds each.")
+    chunks = []
+
+    for i in range(0, len(audio), chunk_size):
+        chunk = audio[i:i + chunk_size]
+        if len(chunk) < chunk_size:
+            print(f"Padding final chunk of size {len(chunk)} to {chunk_size}")
+            chunk = np.pad(chunk, (0, chunk_size - len(chunk)), mode='constant')
+        chunks.append(chunk)
+
+    print(f"Created {len(chunks)} chunks.")
     return chunks
 
 def audio_to_mel_spectrogram(audio, sr, n_mels=128):
