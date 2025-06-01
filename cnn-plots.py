@@ -21,20 +21,27 @@ from imblearn.over_sampling import SMOTE
 # Configuration
 input_base_folder = "output-dataset"  # Folder containing species folders with .npy files
 num_classes = len(os.listdir(input_base_folder))  # Number of species (classes)
-img_height, img_width = 128, 938  # Ensure consistent spectrogram width
+img_height, img_width = 224, 224  # Ensure consistent spectrogram width
 batch_size = 32
 epochs = 20
 
-# Function to pad spectrograms to a fixed width
-def pad_spectrogram(spectrogram, target_width=938):
+def pad_spectrogram(spectrogram, target_height=224, target_width=224):
+    # Pad or truncate height
+    current_height = spectrogram.shape[0]
+    if current_height < target_height:
+        pad_height = np.zeros((target_height - current_height, spectrogram.shape[1]))
+        spectrogram = np.vstack((spectrogram, pad_height))
+    elif current_height > target_height:
+        spectrogram = spectrogram[:target_height, :]
+
+    # Pad or truncate width 
     current_width = spectrogram.shape[1]
     if current_width < target_width:
-        # Pad with zeros on the right
-        padding = np.zeros((spectrogram.shape[0], target_width - current_width))
-        spectrogram = np.hstack((spectrogram, padding))
+        pad_width = np.zeros((spectrogram.shape[0], target_width - current_width))
+        spectrogram = np.hstack((spectrogram, pad_width))
     elif current_width > target_width:
-        # Truncate the spectrogram to the target width
         spectrogram = spectrogram[:, :target_width]
+
     return spectrogram
 
 

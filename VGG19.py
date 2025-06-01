@@ -21,16 +21,16 @@ import pathlib
 import os
 import seaborn as sns
 from itertools import cycle
-
+#change pad function and add SMOTE method
 # Configuration
 input_base_folder = "output-dataset"  # Folder containing species folders with .npy files
 num_classes = len(os.listdir(input_base_folder))  # Number of species (classes)
-img_height, img_width = 128, 938  # Ensure consistent spectrogram width
+img_height, img_width = 224, 224  # Ensure consistent spectrogram width
 batch_size = 32
 epochs = 20
 
 # Function to pad spectrograms to a fixed width
-def pad_spectrogram(spectrogram, target_width=938):
+def pad_spectrogram(spectrogram, target_width=224):
     current_width = spectrogram.shape[1]
     if current_width < target_width:
         padding = np.zeros((spectrogram.shape[0], target_width - current_width))
