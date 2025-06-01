@@ -122,8 +122,7 @@ base_model.trainable = False  # Freeze the base model
 model = Sequential([
     base_model,
     layers.GlobalAveragePooling2D(),
-    layers.Dense(512, activation='relu', kernel_regularizer=regularizers.l2(0.001)),
-    layers.Dropout(0.5),
+    layers.Dense(512, activation='relu'),
     layers.Dense(num_classes, activation='softmax')
 ])
 model.compile(optimizer=Adam(), loss='categorical_crossentropy', metrics=['accuracy'])
