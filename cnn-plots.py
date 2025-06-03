@@ -16,7 +16,6 @@ from sklearn.metrics import (
 import matplotlib.pyplot as plt
 import seaborn as sns
 from itertools import cycle
-from imblearn.over_sampling import SMOTE
 
 # Configuration
 input_base_folder = "output-dataset"  # Folder containing species folders with .npy files
@@ -44,6 +43,31 @@ def pad_spectrogram(spectrogram, target_height=224, target_width=224):
 
     return spectrogram
 
+def zscore_minmax_normalize(spectrogram):
+    mean = np.mean(spectrogram)
+    std = np.std(spectrogram)
+    spectrogram = (spectrogram - mean) / (std + 1e-9)  # Z-score
+    spectrogram = (spectrogram - np.min(spectrogram)) / (np.max(spectrogram) - np.min(spectrogram) + 1e-9)  # Min-Max to [0, 1]
+    return spectrogram
+
+def apply_spec_augment(spectrogram, time_mask_ratio=0.1, freq_mask_ratio=0.1, p=0.5):
+    if np.random.rand() > p:
+        return spectrogram
+
+    spec = spectrogram.copy()
+    num_freqs, num_frames = spec.shape
+
+    # Time masking
+    time_mask_width = int(num_frames * time_mask_ratio)
+    time_start = np.random.randint(0, num_frames - time_mask_width)
+    spec[:, time_start:time_start + time_mask_width] = 0
+
+    # Frequency masking
+    freq_mask_width = int(num_freqs * freq_mask_ratio)
+    freq_start = np.random.randint(0, num_freqs - freq_mask_width)
+    spec[freq_start:freq_start + freq_mask_width, :] = 0
+
+    return spec
 
 # Step 1: Load .npy files and prepare dataset
 def load_dataset(base_folder):
@@ -59,7 +83,9 @@ def load_dataset(base_folder):
                 spectrogram = np.load(file_path)
 
                 # Pad if too short
-                spectrogram = pad_spectrogram(spectrogram, img_width)
+                spectrogram = pad_spectrogram(spectrogram, img_height, img_width)
+                # Normalize the spectrogram
+                spectrogram = zscore_minmax_normalize(spectrogram)
 
                 print(f"{file_name} shape after padding: {spectrogram.shape}")
                 X.append(spectrogram)
@@ -71,31 +97,20 @@ def load_dataset(base_folder):
 # Load dataset
 X, y, class_names = load_dataset(input_base_folder)
 
-# First: Flatten X for SMOTE (it only works on 2D data)
-X_flat = X.reshape((X.shape[0], -1))  # Shape: (samples, features)
+# Add a channel dimension to X (required for CNN input)
+X = np.expand_dims(X, axis=-1)  # Shape: (num_samples, height, width, 1)
 
-# Split first (before one-hot encoding)
-X_train_flat, X_val_flat, y_train_raw, y_val_raw = train_test_split(X_flat, y, test_size=0.2, random_state=42)
+# Convert labels to one-hot encoding
+y = to_categorical(y, num_classes=num_classes)
 
-# Print class balance before SMOTE
-print(f"\n\tPre-SMOTE, label counts: {np.bincount(y_train_raw)}")
+# Split dataset into training and validation sets
+X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, random_state=42)
 
-# Apply SMOTE
-sm = SMOTE(random_state=42)
-X_train_resampled_flat, y_train_resampled = sm.fit_resample(X_train_flat, y_train_raw)
+# Apply SpecAugment to training data only
+for i in range(X_train.shape[0]):
+    X_train[i, :, :, 0] = apply_spec_augment(X_train[i, :, :, 0], time_mask_ratio=0.1, freq_mask_ratio=0.1, p=0.5)
 
-# Print class balance after SMOTE
-print(f"\n\tPost-SMOTE, label counts: {np.bincount(y_train_resampled)}")
-
-# Reshape back to original spectrogram shape and add channel dimension
-X_train_resampled = X_train_resampled_flat.reshape((-1, img_height, img_width, 1))
-X_val = X_val_flat.reshape((-1, img_height, img_width, 1))
-
-# One-hot encode labels
-y_train = to_categorical(y_train_resampled, num_classes=num_classes)
-y_val = to_categorical(y_val_raw, num_classes=num_classes)
-
-print(f"Training data shape after SMOTE: {X_train_resampled.shape}")
+print(f"Training data shape: {X_train.shape}")
 print(f"Validation data shape: {X_val.shape}")
 
 
@@ -133,7 +148,7 @@ model.summary()
 # Step 3: Train the model
 print("Training the model...")
 history = model.fit(
-    X_train_resampled, y_train,
+    X_train, y_train,
     batch_size=batch_size,
     epochs=epochs,
     validation_data=(X_val, y_val)
