@@ -21,13 +21,14 @@ import pathlib
 import os
 import seaborn as sns
 from itertools import cycle
+from tensorflow.keras.applications.efficientnet import preprocess_input
 
 # Configuration
 input_base_folder = "output-dataset"  # Folder containing species folders with .npy files
 num_classes = len(os.listdir(input_base_folder))  # Number of species (classes)
 img_height, img_width = 224, 224  # Ensure consistent spectrogram width
 batch_size = 32
-epochs = 20
+epochs = 35
 
 def pad_spectrogram(spectrogram, target_height=224, target_width=224):
     # Pad or truncate height
@@ -96,7 +97,7 @@ X, y, class_names = load_dataset(input_base_folder)
 # Add a channel dimension to X (required for CNN input)
 X = np.expand_dims(X, axis=-1)  # Shape: (num_samples, height, width, 1)
 X = np.repeat(X, 3, axis=-1)  # EfficientNet expects 3 channels
-
+X = preprocess_input(X)  # Preprocess for EfficientNet
 # Convert labels to one-hot encoding
 y = to_categorical(y, num_classes=num_classes)
 
