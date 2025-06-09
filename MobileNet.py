@@ -21,7 +21,7 @@ import pathlib
 import os
 import seaborn as sns
 from itertools import cycle 
-#change pad function and add SMOTE method
+
 # Configuration
 input_base_folder = "output-dataset"  # Folder containing species folders with .npy files
 num_classes = len(os.listdir(input_base_folder))  # Number of species (classes)
@@ -29,13 +29,50 @@ img_height, img_width = 224, 224  # Ensure consistent spectrogram width
 batch_size = 32
 epochs = 20
 
-# Function to pad spectrograms to a fixed width
-def pad_spectrogram(spectrogram, target_width=224):
+def pad_spectrogram(spectrogram, target_height=224, target_width=224):
+    # Pad or truncate height
+    current_height = spectrogram.shape[0]
+    if current_height < target_height:
+        pad_height = np.zeros((target_height - current_height, spectrogram.shape[1]))
+        spectrogram = np.vstack((spectrogram, pad_height))
+    elif current_height > target_height:
+        spectrogram = spectrogram[:target_height, :]
+
+    # Pad or truncate width 
     current_width = spectrogram.shape[1]
     if current_width < target_width:
-        padding = np.zeros((spectrogram.shape[0], target_width - current_width))
-        spectrogram = np.hstack((spectrogram, padding))  # Pad with zeros
+        pad_width = np.zeros((spectrogram.shape[0], target_width - current_width))
+        spectrogram = np.hstack((spectrogram, pad_width))
+    elif current_width > target_width:
+        spectrogram = spectrogram[:, :target_width]
+
     return spectrogram
+
+def zscore_minmax_normalize(spectrogram):
+    mean = np.mean(spectrogram)
+    std = np.std(spectrogram)
+    spectrogram = (spectrogram - mean) / (std + 1e-9)  # Z-score
+    spectrogram = (spectrogram - np.min(spectrogram)) / (np.max(spectrogram) - np.min(spectrogram) + 1e-9)  # Min-Max to [0, 1]
+    return spectrogram
+
+def apply_spec_augment(spectrogram, time_mask_ratio=0.1, freq_mask_ratio=0.1, p=0.5):
+    if np.random.rand() > p:
+        return spectrogram
+
+    spec = spectrogram.copy()
+    num_freqs, num_frames = spec.shape
+
+    # Time masking
+    time_mask_width = int(num_frames * time_mask_ratio)
+    time_start = np.random.randint(0, num_frames - time_mask_width)
+    spec[:, time_start:time_start + time_mask_width] = 0
+
+    # Frequency masking
+    freq_mask_width = int(num_freqs * freq_mask_ratio)
+    freq_start = np.random.randint(0, num_freqs - freq_mask_width)
+    spec[freq_start:freq_start + freq_mask_width, :] = 0
+
+    return spec
 
 # Step 1: Load .npy files and prepare dataset
 def load_dataset(base_folder):
@@ -51,7 +88,10 @@ def load_dataset(base_folder):
                 spectrogram = np.load(file_path)
 
                 # Pad if too short
-                spectrogram = pad_spectrogram(spectrogram, img_width)
+                spectrogram = pad_spectrogram(spectrogram, img_height, img_width)
+                # Normalize the spectrogram
+                spectrogram = zscore_minmax_normalize(spectrogram)
+
 
                 print(f"{file_name} shape after padding: {spectrogram.shape}")
                 X.append(spectrogram)
@@ -71,6 +111,12 @@ y = to_categorical(y, num_classes=num_classes)
 
 # Split dataset into training and validation sets
 X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, random_state=42)
+
+for i in range(X_train.shape[0]):
+    original = X_train[i, :, :, 0]  # Single channel
+    augmented = apply_spec_augment(original, time_mask_ratio=0.1, freq_mask_ratio=0.1, p=0.5)
+    # Replace only the augmented content, preserve shape
+    X_train[i] = np.stack([augmented] * 3, axis=-1)
 
 print(f"Training data shape: {X_train.shape}")
 print(f"Validation data shape: {X_val.shape}") 

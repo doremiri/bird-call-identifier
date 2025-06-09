@@ -21,21 +21,34 @@ import pathlib
 import os
 import seaborn as sns
 from itertools import cycle
-#change pad function and add SMOTE method
+from tensorflow.keras.applications.vgg16 import preprocess_input as vgg16_preprocess
+
 # Configuration
 input_base_folder = "output-dataset"  # Folder containing species folders with .npy files
 num_classes = len(os.listdir(input_base_folder))  # Number of species (classes)
 img_height, img_width = 224, 224  # Ensure consistent spectrogram width
 batch_size = 32
-epochs = 20
+epochs = 10
 
-# Function to pad spectrograms to a fixed width
-def pad_spectrogram(spectrogram, target_width=224):
+def pad_spectrogram(spectrogram, target_height=224, target_width=224):
+    # Pad or truncate height
+    current_height = spectrogram.shape[0]
+    if current_height < target_height:
+        pad_height = np.zeros((target_height - current_height, spectrogram.shape[1]))
+        spectrogram = np.vstack((spectrogram, pad_height))
+    elif current_height > target_height:
+        spectrogram = spectrogram[:target_height, :]
+
+    # Pad or truncate width 
     current_width = spectrogram.shape[1]
     if current_width < target_width:
-        padding = np.zeros((spectrogram.shape[0], target_width - current_width))
-        spectrogram = np.hstack((spectrogram, padding))  # Pad with zeros
+        pad_width = np.zeros((spectrogram.shape[0], target_width - current_width))
+        spectrogram = np.hstack((spectrogram, pad_width))
+    elif current_width > target_width:
+        spectrogram = spectrogram[:, :target_width]
+
     return spectrogram
+
 
 # Step 1: Load .npy files and prepare dataset
 def load_dataset(base_folder):
@@ -51,7 +64,8 @@ def load_dataset(base_folder):
                 spectrogram = np.load(file_path)
 
                 # Pad if too short
-                spectrogram = pad_spectrogram(spectrogram, img_width)
+                spectrogram = pad_spectrogram(spectrogram, img_height, img_width)
+                
 
                 print(f"{file_name} shape after padding: {spectrogram.shape}")
                 X.append(spectrogram)
@@ -60,33 +74,45 @@ def load_dataset(base_folder):
     y = np.array(y)
     return X, y, class_names
 
+
 # Load dataset
 X, y, class_names = load_dataset(input_base_folder)
 
 # Add a channel dimension to X (required for CNN input)
 X = np.expand_dims(X, axis=-1)  # Shape: (num_samples, height, width, 1)
-X = np.repeat(X, 3, axis=-1)  # Convert grayscale to RGB
-
+X = np.repeat(X, 3, axis=-1)  # Convert to 3 channels (RGB)
 # Convert labels to one-hot encoding
 y = to_categorical(y, num_classes=num_classes)
-
+X = vgg16_preprocess(X)
 # Split dataset into training and validation sets
 X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, random_state=42)
 
+
 print(f"Training data shape: {X_train.shape}")
-print(f"Validation data shape: {X_val.shape}")
+print(f"Validation data shape: {X_val.shape}") 
 
 base_model = VGG16(weights='imagenet', include_top=False, input_shape=(img_height, img_width, 3))
 base_model.trainable = False  # Freeze the base model
 model = Sequential([
     base_model,
     layers.GlobalAveragePooling2D(),
-    layers.Dense(512, activation='relu'),
+    layers.Dense(256, activation='relu'),
     layers.Dense(num_classes, activation='softmax')
 ])
 model.compile(optimizer=Adam(), loss='categorical_crossentropy', metrics=['accuracy'])
 model.summary()
 history = model.fit(X_train, y_train, validation_data=(X_val, y_val), epochs=epochs, batch_size=batch_size)
+# Unfreeze the last 4 layers of the base model
+for layer in base_model.layers[-4:]:  
+    layer.trainable = True
+
+# Recompile with a lower learning rate for fine-tuning
+model.compile(optimizer=Adam(learning_rate=1e-5),  # lower LR to prevent large weight updates
+              loss='categorical_crossentropy',
+              metrics=['accuracy'])
+
+# Continue training (fine-tuning)
+history_finetune = model.fit(X_train, y_train, validation_data=(X_val, y_val), epochs=epochs, batch_size=batch_size)
 
 print("Evaluating the model...")
 val_loss, val_accuracy = model.evaluate(X_val, y_val)

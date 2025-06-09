@@ -8,6 +8,7 @@ from tensorflow.keras.layers import Flatten, Dense
 from tensorflow.keras.optimizers import Adam    
 from sklearn.model_selection import train_test_split
 from tensorflow.keras.utils import to_categorical
+from tensorflow.keras.applications.resnet50 import preprocess_input as resnet_preprocess
 from sklearn.metrics import (
     accuracy_score,
     precision_score,
@@ -21,14 +22,13 @@ import pathlib
 import os
 import seaborn as sns
 from itertools import cycle
-from imblearn.over_sampling import SMOTE
-from collections import Counter
+
 # Configuration
 input_base_folder = "output-dataset"  # Folder containing species folders with .npy files
 num_classes = len(os.listdir(input_base_folder))  # Number of species (classes)
 img_height, img_width = 224, 224  # Ensure consistent spectrogram width
 batch_size = 32
-epochs = 20
+epochs = 10
 
 def pad_spectrogram(spectrogram, target_height=224, target_width=224):
     # Pad or truncate height
@@ -49,6 +49,25 @@ def pad_spectrogram(spectrogram, target_height=224, target_width=224):
 
     return spectrogram
 
+def apply_spec_augment(spectrogram, time_mask_ratio=0.1, freq_mask_ratio=0.1, p=0.5):
+    if np.random.rand() > p:
+        return spectrogram
+
+    spec = spectrogram.copy()
+    num_freqs, num_frames = spec.shape
+
+    # Time masking
+    time_mask_width = int(num_frames * time_mask_ratio)
+    time_start = np.random.randint(0, num_frames - time_mask_width)
+    spec[:, time_start:time_start + time_mask_width] = 0
+
+    # Frequency masking
+    freq_mask_width = int(num_freqs * freq_mask_ratio)
+    freq_start = np.random.randint(0, num_freqs - freq_mask_width)
+    spec[freq_start:freq_start + freq_mask_width, :] = 0
+
+    return spec
+
 
 # Step 1: Load .npy files and prepare dataset
 def load_dataset(base_folder):
@@ -63,8 +82,8 @@ def load_dataset(base_folder):
                 file_path = os.path.join(class_folder, file_name)
                 spectrogram = np.load(file_path)
 
-                # Pad if too short
-                spectrogram = pad_spectrogram(spectrogram, img_width)
+                 # Pad if too short
+                spectrogram = pad_spectrogram(spectrogram, img_height, img_width)
 
                 print(f"{file_name} shape after padding: {spectrogram.shape}")
                 X.append(spectrogram)
@@ -76,58 +95,50 @@ def load_dataset(base_folder):
 # Load dataset
 X, y, class_names = load_dataset(input_base_folder)
 
-# First: Flatten X for SMOTE 
-X_flat = X.reshape((X.shape[0], -1))  # Shape: (samples, features)
+# Add a channel dimension to X (required for CNN input)
+X = np.expand_dims(X, axis=-1)  # Shape: (num_samples, height, width, 1)
+X = np.repeat(X, 3, axis=-1)  # Convert to 3 channels (RGB)
+# Convert labels to one-hot encoding
+y = to_categorical(y, num_classes=num_classes)
 
-# Split first (before one-hot encoding)
-X_train_flat, X_val_flat, y_train_raw, y_val_raw = train_test_split(X_flat, y, test_size=0.2, random_state=42)
-# Count samples per class
-original_counts = Counter(y_train_raw)
+# Split dataset into training and validation sets
+X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, random_state=42)
 
-# Set a target count
-target_count = 350
+X_train = resnet_preprocess(X_train)
+X_val = resnet_preprocess(X_val)
 
-# Only oversample classes that are below target_count
-sampling_strategy = {
-    label: target_count for label, count in original_counts.items() if count < target_count
-}
-
-
-# Print class balance before SMOTE
-print(f"\n\tPre-SMOTE, label counts: {np.bincount(y_train_raw)}")
-
-# Apply SMOTE
-sm = SMOTE(random_state=42, sampling_strategy=sampling_strategy)
-X_train_resampled_flat, y_train_resampled = sm.fit_resample(X_train_flat, y_train_raw)
-
-# Print class balance after SMOTE
-print(f"\n\tPost-SMOTE, label counts: {np.bincount(y_train_resampled)}")
-
-# Reshape back to original spectrogram shape and add channel dimension
-X_train_resampled = X_train_resampled_flat.reshape((-1, img_height, img_width, 1)).astype(np.float32)
-X_train_resampled = np.repeat(X_train_resampled, 3, axis=-1) #Convert to RGB
-
-X_val = X_val_flat.reshape((-1, img_height, img_width, 1)).astype(np.float32)
-X_val = np.repeat(X_val, 3, axis=-1) #Convert to RGB
-
-# One-hot encode labels
-y_train = to_categorical(y_train_resampled, num_classes=num_classes)
-y_val = to_categorical(y_val_raw, num_classes=num_classes)
-
-print(f"Training data shape after SMOTE: {X_train_resampled.shape}")
-print(f"Validation data shape: {X_val.shape}")
+print(f"Training data shape: {X_train.shape}")
+print(f"Validation data shape: {X_val.shape}") 
 
 base_model = ResNet50(weights='imagenet', include_top=False, input_shape=(img_height, img_width, 3))
 base_model.trainable = False  # Freeze the base model
 model = Sequential([
     base_model,
     layers.GlobalAveragePooling2D(),
-    layers.Dense(512, activation='relu'),
+    layers.Dense(256, activation='relu'),
     layers.Dense(num_classes, activation='softmax')
 ])
-model.compile(optimizer=Adam(), loss='categorical_crossentropy', metrics=['accuracy'])
+
+model.compile(optimizer=Adam(learning_rate=1e-4), loss='categorical_crossentropy', metrics=['accuracy'])
 model.summary()
-history = model.fit(X_train_resampled, y_train, validation_data=(X_val, y_val), epochs=epochs, batch_size=batch_size)
+history1 = model.fit(X_train, y_train, validation_data=(X_val, y_val), epochs=epochs, batch_size=batch_size)
+
+# Second phase: Unfreeze last 20 layers and fine-tune
+for layer in base_model.layers[-20:]:
+    layer.trainable = True
+
+model.compile(optimizer=Adam(learning_rate=1e-5), loss='categorical_crossentropy', metrics=['accuracy'])
+history_2 = model.fit(X_train, y_train, validation_data=(X_val, y_val), epochs=10, batch_size=batch_size)
+model.compile(optimizer=Adam(learning_rate=1e-5), 
+              loss='categorical_crossentropy',
+              metrics=['accuracy'])
+
+history_combined = {
+    'loss': history1.history['loss'] + history_2.history['loss'],
+    'val_loss': history1.history['val_loss'] + history_2.history['val_loss'],
+    'accuracy': history1.history['accuracy'] + history_2.history['accuracy'],
+    'val_accuracy': history1.history['val_accuracy'] + history_2.history['val_accuracy'],
+}
 
 print("Evaluating the model...")
 val_loss, val_accuracy = model.evaluate(X_val, y_val)
@@ -187,8 +198,8 @@ def evaluate_model(model, X_val, y_val, class_names):
 
     # Plot training and validation loss
     plt.figure(figsize=(10, 6))
-    plt.plot(history.history['loss'], label='Training Loss')
-    plt.plot(history.history['val_loss'], label='Validation Loss')
+    plt.plot(history_combined.history['loss'], label='Training Loss')
+    plt.plot(history_combined.history['val_loss'], label='Validation Loss')
     plt.title('Training and Validation Loss')
     plt.xlabel('Epoch')
     plt.ylabel('Loss')
@@ -197,8 +208,8 @@ def evaluate_model(model, X_val, y_val, class_names):
 
     # Plot training and validation accuracy
     plt.figure(figsize=(10, 6))
-    plt.plot(history.history['accuracy'], label='Training Accuracy')
-    plt.plot(history.history['val_accuracy'], label='Validation Accuracy')
+    plt.plot(history_combined.history['accuracy'], label='Training Accuracy')
+    plt.plot(history_combined.history['val_accuracy'], label='Validation Accuracy')
     plt.title('Training and Validation Accuracy')
     plt.xlabel('Epoch')
     plt.ylabel('Accuracy')

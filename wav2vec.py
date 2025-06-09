@@ -24,6 +24,7 @@ from transformers import Wav2Vec2FeatureExtractor, AutoModelForAudioClassificati
 import matplotlib.pyplot as plt
 import itertools
 
+
 # Define the sample rate in Hertz (Hz) expected by Wav2Vec 2.0
 RATE_HZ = 16000
 # Define the maximum audio interval length to consider in seconds
@@ -210,8 +211,9 @@ gc.collect()
 model_name = "facebook/wav2vec2-base"
 #load the feature extractor 
 feature_extractor = Wav2Vec2FeatureExtractor.from_pretrained(model_name)
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 #load the pretrained model
-model = AutoModelForAudioClassification.from_pretrained(model_name, num_labels=len(label2id), id2label=id2label, label2id=label2id)
+model = AutoModelForAudioClassification.from_pretrained(model_name, num_labels=len(label2id), id2label=id2label, label2id=label2id).to(device)
 #print("Feature Extractor: ", feature_extractor)
 #print("Model: ", model)
 
@@ -287,6 +289,7 @@ training_args = TrainingArguments(
     gradient_checkpointing=True,  # Enable gradient checkpointing
     save_strategy='epoch',  # Save model at the end of each epoch
     save_total_limit=1,  # Limit the number of saved checkpoints
+    fp16=torch.cuda.is_available(),
 )
 
 # Create a Trainer object to manage the training process
