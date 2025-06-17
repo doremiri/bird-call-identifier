@@ -101,19 +101,23 @@ model = Sequential([
 ])
 model.compile(optimizer=Adam(), loss='categorical_crossentropy', metrics=['accuracy'])
 model.summary()
-history = model.fit(X_train, y_train, validation_data=(X_val, y_val), epochs=epochs, batch_size=batch_size)
+history1 = model.fit(X_train, y_train, validation_data=(X_val, y_val), epochs=epochs, batch_size=batch_size)
 # Unfreeze the last 4 layers of the base model
 for layer in base_model.layers[-4:]:  
     layer.trainable = True
 
-# Recompile with a lower learning rate for fine-tuning
-model.compile(optimizer=Adam(learning_rate=1e-5),  # lower LR to prevent large weight updates
+model.compile(optimizer=Adam(learning_rate=1e-5), loss='categorical_crossentropy', metrics=['accuracy'])
+history_2 = model.fit(X_train, y_train, validation_data=(X_val, y_val), epochs=10, batch_size=batch_size)
+model.compile(optimizer=Adam(learning_rate=1e-5), 
               loss='categorical_crossentropy',
               metrics=['accuracy'])
 
-# Continue training (fine-tuning)
-history_finetune = model.fit(X_train, y_train, validation_data=(X_val, y_val), epochs=epochs, batch_size=batch_size)
-
+history_combined = {
+    'loss': history1.history['loss'] + history_2.history['loss'],
+    'val_loss': history1.history['val_loss'] + history_2.history['val_loss'],
+    'accuracy': history1.history['accuracy'] + history_2.history['accuracy'],
+    'val_accuracy': history1.history['val_accuracy'] + history_2.history['val_accuracy'],
+}
 print("Evaluating the model...")
 val_loss, val_accuracy = model.evaluate(X_val, y_val)
 print(f"Validation Loss: {val_loss}")
@@ -172,8 +176,8 @@ def evaluate_model(model, X_val, y_val, class_names):
 
     # Plot training and validation loss
     plt.figure(figsize=(10, 6))
-    plt.plot(history.history['loss'], label='Training Loss')
-    plt.plot(history.history['val_loss'], label='Validation Loss')
+    plt.plot(history_combined.history['loss'], label='Training Loss')
+    plt.plot(history_combined.history['val_loss'], label='Validation Loss')
     plt.title('Training and Validation Loss')
     plt.xlabel('Epoch')
     plt.ylabel('Loss')
@@ -182,8 +186,8 @@ def evaluate_model(model, X_val, y_val, class_names):
 
     # Plot training and validation accuracy
     plt.figure(figsize=(10, 6))
-    plt.plot(history.history['accuracy'], label='Training Accuracy')
-    plt.plot(history.history['val_accuracy'], label='Validation Accuracy')
+    plt.plot(history_combined.history['accuracy'], label='Training Accuracy')
+    plt.plot(history_combined.history['val_accuracy'], label='Validation Accuracy')
     plt.title('Training and Validation Accuracy')
     plt.xlabel('Epoch')
     plt.ylabel('Accuracy')

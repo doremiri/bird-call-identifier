@@ -49,25 +49,6 @@ def pad_spectrogram(spectrogram, target_height=224, target_width=224):
 
     return spectrogram
 
-def apply_spec_augment(spectrogram, time_mask_ratio=0.1, freq_mask_ratio=0.1, p=0.5):
-    if np.random.rand() > p:
-        return spectrogram
-
-    spec = spectrogram.copy()
-    num_freqs, num_frames = spec.shape
-
-    # Time masking
-    time_mask_width = int(num_frames * time_mask_ratio)
-    time_start = np.random.randint(0, num_frames - time_mask_width)
-    spec[:, time_start:time_start + time_mask_width] = 0
-
-    # Frequency masking
-    freq_mask_width = int(num_freqs * freq_mask_ratio)
-    freq_start = np.random.randint(0, num_freqs - freq_mask_width)
-    spec[freq_start:freq_start + freq_mask_width, :] = 0
-
-    return spec
-
 # Step 1: Load .npy files and prepare dataset
 def load_dataset(base_folder):
     X = []  # Spectrograms

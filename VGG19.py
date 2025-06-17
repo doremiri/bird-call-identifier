@@ -21,21 +21,34 @@ import pathlib
 import os
 import seaborn as sns
 from itertools import cycle
-#change pad function and add SMOTE method
+from tensorflow.keras.applications.vgg19 import preprocess_input as vgg19_preprocess
 # Configuration
 input_base_folder = "output-dataset"  # Folder containing species folders with .npy files
 num_classes = len(os.listdir(input_base_folder))  # Number of species (classes)
 img_height, img_width = 224, 224  # Ensure consistent spectrogram width
 batch_size = 32
-epochs = 20
+epochs = 10
 
-# Function to pad spectrograms to a fixed width
-def pad_spectrogram(spectrogram, target_width=224):
+
+def pad_spectrogram(spectrogram, target_height=224, target_width=224):
+    # Pad or truncate height
+    current_height = spectrogram.shape[0]
+    if current_height < target_height:
+        pad_height = np.zeros((target_height - current_height, spectrogram.shape[1]))
+        spectrogram = np.vstack((spectrogram, pad_height))
+    elif current_height > target_height:
+        spectrogram = spectrogram[:target_height, :]
+
+    # Pad or truncate width 
     current_width = spectrogram.shape[1]
     if current_width < target_width:
-        padding = np.zeros((spectrogram.shape[0], target_width - current_width))
-        spectrogram = np.hstack((spectrogram, padding))  # Pad with zeros
+        pad_width = np.zeros((spectrogram.shape[0], target_width - current_width))
+        spectrogram = np.hstack((spectrogram, pad_width))
+    elif current_width > target_width:
+        spectrogram = spectrogram[:, :target_width]
+
     return spectrogram
+
 
 # Step 1: Load .npy files and prepare dataset
 def load_dataset(base_folder):
@@ -69,7 +82,7 @@ X = np.repeat(X, 3, axis=-1)  # Convert grayscale to RGB
 
 # Convert labels to one-hot encoding
 y = to_categorical(y, num_classes=num_classes)
-
+X = vgg19_preprocess(X)
 # Split dataset into training and validation sets
 X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, random_state=42)
 
@@ -81,13 +94,28 @@ base_model.trainable = False  # Freeze the base model
 model = Sequential([
     base_model,
     layers.GlobalAveragePooling2D(),
-    layers.Dense(512, activation='relu'),
+    layers.Dense(256, activation='relu'),
     layers.Dense(num_classes, activation='softmax')
 ])
 model.compile(optimizer=Adam(), loss='categorical_crossentropy', metrics=['accuracy'])
 model.summary()
-history = model.fit(X_train, y_train, validation_data=(X_val, y_val), epochs=epochs, batch_size=batch_size)
+history1 = model.fit(X_train, y_train, validation_data=(X_val, y_val), epochs=epochs, batch_size=batch_size)
+# Unfreeze the last 4 layers of the base model
+for layer in base_model.layers[-4:]:  
+    layer.trainable = True
 
+model.compile(optimizer=Adam(learning_rate=1e-5), loss='categorical_crossentropy', metrics=['accuracy'])
+history_2 = model.fit(X_train, y_train, validation_data=(X_val, y_val), epochs=10, batch_size=batch_size)
+model.compile(optimizer=Adam(learning_rate=1e-5), 
+              loss='categorical_crossentropy',
+              metrics=['accuracy'])
+
+history_combined = {
+    'loss': history1.history['loss'] + history_2.history['loss'],
+    'val_loss': history1.history['val_loss'] + history_2.history['val_loss'],
+    'accuracy': history1.history['accuracy'] + history_2.history['accuracy'],
+    'val_accuracy': history1.history['val_accuracy'] + history_2.history['val_accuracy'],
+}
 print("Evaluating the model...")
 val_loss, val_accuracy = model.evaluate(X_val, y_val)
 print(f"Validation Loss: {val_loss}")
@@ -146,8 +174,8 @@ def evaluate_model(model, X_val, y_val, class_names):
 
     # Plot training and validation loss
     plt.figure(figsize=(10, 6))
-    plt.plot(history.history['loss'], label='Training Loss')
-    plt.plot(history.history['val_loss'], label='Validation Loss')
+    plt.plot(history_combined.history['loss'], label='Training Loss')
+    plt.plot(history_combined.history['val_loss'], label='Validation Loss')
     plt.title('Training and Validation Loss')
     plt.xlabel('Epoch')
     plt.ylabel('Loss')
@@ -156,8 +184,8 @@ def evaluate_model(model, X_val, y_val, class_names):
 
     # Plot training and validation accuracy
     plt.figure(figsize=(10, 6))
-    plt.plot(history.history['accuracy'], label='Training Accuracy')
-    plt.plot(history.history['val_accuracy'], label='Validation Accuracy')
+    plt.plot(history_combined.history['accuracy'], label='Training Accuracy')
+    plt.plot(history_combined.history['val_accuracy'], label='Validation Accuracy')
     plt.title('Training and Validation Accuracy')
     plt.xlabel('Epoch')
     plt.ylabel('Accuracy')
