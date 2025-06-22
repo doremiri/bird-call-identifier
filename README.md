@@ -6,7 +6,9 @@ The models used in this project are:
 2. ResNet50
 3. VGG16
 4. VGG19
-5. Wav2Vec 2.0
+5. MobileNet
+6. EfficientNetB0
+7. Wav2Vec 2.0
 
 For our implementation we utilized **audio to mel-spectrogram** to process the audio data, and used that to train the models. 
 ---
