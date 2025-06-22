@@ -1,5 +1,3 @@
-TODO: add images to githubb README
-
 # Bird song classifier using Mel-Spectrograms and different neural network models.
 The models used in this project are: 
 1. CNN
